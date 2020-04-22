@@ -22,6 +22,7 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 
+appsettings.local.json
 
 ### Linux ###
 *~
