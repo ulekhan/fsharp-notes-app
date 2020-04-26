@@ -46,43 +46,60 @@ module DataProvider =
             return result
         }
 
-    let private insertNote' (note: Note) (connection: SqlConnection) (transaction: DbTransaction) =
-        let sql = "INSERT INTO Notes (Name, Status, Description)
-                               VALUES (@Name, @Status, @Description)
-                               SELECT CAST(SCOPE_IDENTITY() as int)"
+    let private insertNote' (note: NewNote) (connection: SqlConnection) (transaction: DbTransaction) =
+        async {
+            let noteSql = "INSERT INTO Notes (Name, Status, Description)
+                                   VALUES (@Name, @Status, @Description)
+                                   SELECT CAST(SCOPE_IDENTITY() as int)"
 
-        let item =
-            match note with
-            | Tick tick ->
-                {| Name = tick.Name
-                   Status = tick.Status
-                   Description = tick.Description |}
-            | Todo todo ->
-                {| Name = todo.Name
-                   Status = todo.Status
-                   Description = null |}
+            let todoItemSql = "INSERT INTO TodoItems (Name, Status, NoteId)
+                                   VALUES (@Name, @Status, @NoteId) "
 
-        let task = connection.QuerySingleAsync<int>(sql, item, transaction)
-        task
+            let note =
+                match note with
+                | NewTick tick ->
+                    {| tick with
+                           Status = NoteStatus.Active
+                           Items = List.empty
+                           Description = tick.Description |}
+                | NewTodo todo ->
+                    {| todo with
+                           Status = NoteStatus.Active
+                           Items = todo.Items
+                           Description = null |}
 
-    let createNote (note: Note) (connection: SqlConnection) =
+            let! noteId = connection.QuerySingleAsync<int>(noteSql, note, transaction) |> Async.AwaitTask
+
+            for item in note.Items |> List.map (fun p -> {| p with NoteId = noteId |}) do
+                do! connection.ExecuteAsync(todoItemSql, item, transaction)
+                    |> Async.AwaitTask
+                    |> Async.Ignore
+
+            return noteId
+        }
+        |> Async.StartAsTask
+
+    let createNote (note: NewNote) (connection: SqlConnection) =
         let bind conn = insertNote' note conn
-        executeTransaction connection bind
-
+        executeTransaction<int> connection bind
 
     let mapRowsToRecords (reader: IDataReader) =
-        let idIndex = reader.GetOrdinal "Id"
-        let nameIndex = reader.GetOrdinal "Name"
-        let descriptionIndex = reader.GetOrdinal "Description"
-        let statusIndex = reader.GetOrdinal "Status"
-        let dateIndex = reader.GetOrdinal "DateModified"
+        let idIndex = reader.GetOrdinal "noteId"
+        let nameIndex = reader.GetOrdinal "noteName"
+        let descriptionIndex = reader.GetOrdinal "noteDescription"
+        let statusIndex = reader.GetOrdinal "noteStatus"
+        let dateIndex = reader.GetOrdinal "noteDateModified"
+        let itemId = reader.GetOrdinal "itemId"
+        let itemStatus = reader.GetOrdinal "itemStatus"
+        let itemDateModified = reader.GetOrdinal "itemDateModified"
+        let itemName = reader.GetOrdinal "itemName"
 
         [ while reader.Read() do
-            let description = reader.GetString descriptionIndex
+            let hasDescription = not (reader.IsDBNull descriptionIndex)
 
-            let item =
-                match description with
-                | null ->
+            let todo =
+                match hasDescription with
+                | true ->
                     { Id = reader.GetInt32 idIndex
                       Name = reader.GetString nameIndex
                       Status = enum<NoteStatus> (reader.GetInt32 statusIndex)
@@ -97,15 +114,71 @@ module DataProvider =
                       Items = list.Empty |> Some
                       DateModified = reader.GetDateTime dateIndex }
 
-            yield item ]
+            let item =
+                if not <| reader.IsDBNull itemId then
+                    Some
+                        { Id = reader.GetInt32 itemId
+                          Name = reader.GetString itemName
+                          Status = enum<TodoStatus> (reader.GetInt32 itemStatus)
+                          DateModified = reader.GetDateTime itemDateModified }
+                else
+                    None
+
+            yield (todo, item) ]
 
     let getNote (id: int) (connection: SqlConnection) =
         async {
-            let sql = "SELECT * FROM Notes WHERE Id = @Id"
+            let sql = "SELECT n.id as noteId,
+                              n.name as noteName,
+                              n.status as noteStatus,
+                              n.description as noteDescription,
+                              n.dateModified as noteDateModified,
+                              i.id as itemId,
+                              i.status as itemStatus,
+                              i.dateModified as itemDateModified,
+                              i.name as itemName
+                       FROM Notes as n left join TodoItems i on n.Id = i.NoteID WHERE n.Id = @Id"
             let! reader = connection.ExecuteReaderAsync(sql, {| Id = id |}) |> Async.AwaitTask
             let items = reader |> mapRowsToRecords
 
             return match items with
-                   | [ x ] -> x |> Ok
-                   | _ -> sprintf "note with id %i does not exist" id |> Error
+                   | [] -> sprintf "note with id %i does not exist" id |> Error
+                   | _ ->
+                       let note =
+                           items
+                           |> List.head
+                           |> fst
+
+                       let todoItems =
+                           items
+                           |> List.filter (fun it -> (snd it) |> Option.isSome)
+                           |> List.map (fun p -> snd p)
+
+                       Ok {| note with Items = todoItems |}
+        }
+
+    let getNotes (connection: SqlConnection) =
+        async {
+            let sql = "SELECT n.id as noteId,
+                              n.name as noteName,
+                              n.status as noteStatus,
+                              n.description as noteDescription,
+                              n.dateModified as noteDateModified,
+                              i.id as itemId,
+                              i.status as itemStatus,
+                              i.dateModified as itemDateModified,
+                              i.name as itemName
+                       FROM Notes as n left join TodoItems i on n.Id = i.NoteId"
+            let! reader = connection.ExecuteReaderAsync(sql, {| Id = id |}) |> Async.AwaitTask
+            let items = reader |> mapRowsToRecords
+
+            return items
+                   |> List.groupBy (fun (note, _) -> note)
+                   |> List.map (fun tuple ->
+                       {| fst tuple with
+                              Items =
+                                  (snd tuple)
+                                  |> List.filter (fun t -> (snd t) |> Option.isSome)
+                                  |> List.map (fun t -> snd t) |})
+                   |> Ok
         }

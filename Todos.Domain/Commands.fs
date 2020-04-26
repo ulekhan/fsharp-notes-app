@@ -2,59 +2,63 @@
 
 open Todos.Domain.Models
 
-type TodoResponseModel =
-    { Id: int
-      Name: string
-      Description: string
-      Status: NoteStatus
-      Items: list<TodoItem> }
+module Response =
+    type TodoResponseModel =
+        { Id: int
+          Name: string
+          Description: string
+          Status: NoteStatus
+          Items: list<TodoItem> }
 
-type CreateTodoCommand =
-    { Name: string
-      Items: list<TodoItem>}
+module Create =
 
-[<CLIMutable>]
-type CreateTickCommand =
-    { Name: string
-      Description: string}
-    
-[<CLIMutable>]
-type CreateNoteCommand =
-    { Name: string
-      Description: Option<string>
-      Items: Option<TodoItem list>}
+    [<CLIMutable>]
+    type CreateTodoCommand =
+        { Name: string
+          Items: NewTodoItem list }
 
-type DeleteNoteCommand =
-    { Id: int }
+    [<CLIMutable>]
+    type CreateTickCommand =
+        { Name: string
+          Description: string }
 
-type GetNoteCommand =
-    { Id: int }
+    [<CLIMutable>]
+    type CreateNoteCommand =
+        { Name: string
+          Description: Option<string>
+          Items: NewTodoItem list }
 
-type GetNotesCommand = {
-    PageNumber: int
-    Count: int
-}
+module Delete =
+    type DeleteNoteCommand =
+        { Id: int }
 
-[<CLIMutable>]
-type EditTodoCommand =
-    { Id: int
-      Name: string
-      Status: NoteStatus
-      Items: list<TodoItem>}
+module Get =
+    type GetNoteQuery =
+        { Id: int }
 
-[<CLIMutable>]
-type EditTickCommand =
-    { Id: int
-      Name: string
-      Status: NoteStatus
-      Description: string }
+    type GetNotesQuery =
+        { PageNumber: int
+          Count: int }
 
-[<CLIMutable>]
-type EditNoteCommand =
-    {
-        Id: int
-        Name: string
-        Status: NoteStatus
-        Description: string option
-        Items: TodoItem list option 
-    }
+module Edit =
+    [<CLIMutable>]
+    type EditTodoCommand =
+        { Id: int
+          Name: string
+          Status: NoteStatus
+          Items: list<TodoItem> }
+
+    [<CLIMutable>]
+    type EditTickCommand =
+        { Id: int
+          Name: string
+          Status: NoteStatus
+          Description: string }
+
+    [<CLIMutable>]
+    type EditNoteCommand =
+        { Id: int
+          Name: string
+          Status: NoteStatus
+          Description: string option
+          Items: TodoItem list option }
